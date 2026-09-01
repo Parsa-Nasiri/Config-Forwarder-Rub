@@ -1,0 +1,14 @@
+{
+  "instance": "initial",
+  "started_at": "2026-09-01T00:00:00Z",
+  "updated_at": "2026-09-01T00:00:00Z",
+  "uptime_seconds": 0,
+  "leader": false,
+  "counters": {
+    "delivered": 0,
+    "failed": 0,
+    "ingested": 0,
+    "unique": 0
+  },
+  "note": "Placeholder heartbeat. The first real run overwrites this file; the watchdog and the bot.yml pre-flight guard read it to decide liveness."
+}

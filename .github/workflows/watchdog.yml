@@ -1,0 +1,59 @@
+# ---------------------------------------------------------------------------
+# Tele2Rubika :: watchdog
+#
+# The bot re-arms itself, but self-healing chains still break: a runner gets
+# killed, a dispatch gets dropped, GitHub has a bad day. This workflow is the
+# external heartbeat - it asks Supabase whether anybody currently holds the
+# leader lease, and restarts the chain when nobody does.
+#
+# It deliberately does NOT trust the heartbeat file alone. The lease is the
+# real "is a process alive" signal: every live runner refreshes a 90 second
+# lease, so an expired lease means the bot is genuinely down.
+# ---------------------------------------------------------------------------
+
+name: Tele2Rubika Watchdog
+
+on:
+  schedule:
+    - cron: "41 * * * *" # hourly, offset from the bot's own schedule
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    name: Check for a live runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL || vars.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install httpx
+        run: pip install "httpx>=0.27.0,<1.0.0"
+
+      - name: Probe liveness and restart if needed
+        id: probe
+        run: python scripts/watchdog.py
+        continue-on-error: true
+
+      - name: Report
+        if: always()
+        run: |
+          case "${{ steps.probe.outcome }}" in
+            success) echo "bot is healthy" ;;
+            failure) echo "::warning::watchdog could not determine liveness" ;;
+          esac

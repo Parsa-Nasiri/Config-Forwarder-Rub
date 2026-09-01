@@ -1,0 +1,86 @@
+# ---------------------------------------------------------------------------
+# Tele2Rubika :: continuous integration
+#
+# Cheap guardrails on every push and PR: everything compiles, the parser corpus
+# still parses, and the unit tests pass. Uses the in-memory store, so no
+# Supabase project or API key is needed.
+# ---------------------------------------------------------------------------
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Lint, compile and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Byte-compile everything
+        run: python -m compileall -q bot scripts tests
+
+      - name: Extractor self test
+        run: python -m bot.main --self-test
+
+      - name: Configuration check (no credentials present)
+        run: python -m bot.main --check || true
+
+      - name: Unit tests
+        run: pytest -q
+
+  workflow-sanity:
+    name: Validate workflow files
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse every workflow as YAML
+        run: |
+          pip install pyyaml
+          python - <<'PY'
+          import pathlib, sys
+
+          import yaml
+
+          ok = True
+          for path in sorted(pathlib.Path(".github/workflows").glob("*.y*ml")):
+              try:
+                  data = yaml.safe_load(path.read_text(encoding="utf-8"))
+              except Exception as exc:
+                  print(f"[FAIL] {path}: {exc}")
+                  ok = False
+                  continue
+              jobs = (data or {}).get("jobs") or {}
+              print(f"[OK]   {path.name}: {len(jobs)} job(s) -> {', '.join(jobs) or '-'}")
+          sys.exit(0 if ok else 1)
+          PY

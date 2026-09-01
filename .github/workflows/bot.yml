@@ -1,0 +1,217 @@
+# ---------------------------------------------------------------------------
+# Tele2Rubika :: the long-running bot
+#
+# GitHub Actions kills any job at 6 hours. So the bot never tries to live that
+# long: it runs for 5h40m, and 3 minutes before its own deadline it fires a
+# `repository_dispatch` that queues the *next* run. The next run boots while
+# this one is still alive, and the moment this one exits the next takes over.
+#
+# Three layers keep that gap-free and duplicate-free:
+#   1. MAX_RUNTIME (5h40m) + HANDOFF_LEAD (3m)  -> the chain always re-arms
+#      before the 6h axe falls.
+#   2. A concurrency group with cancel-in-progress: false -> the newly
+#      dispatched run waits its turn instead of being cancelled, so there is
+#      never more than one *running* job and never a queue pile-up.
+#   3. A leader lease in Supabase -> even if two runners do overlap (a
+#      scheduled run colliding with a handoff), only the lease holder polls
+#      Telegram, reads Rubika updates and sends messages. The other idles as a
+#      hot standby and takes over in under a second.
+#
+# The schedule at the bottom is a safety net: if the chain ever breaks, a
+# scheduled run picks it back up. A pre-flight guard makes that a no-op while
+# the bot is healthy.
+# ---------------------------------------------------------------------------
+
+name: Tele2Rubika Bot
+
+on:
+  repository_dispatch:
+    types: [bot-handoff]
+  workflow_dispatch:
+    inputs:
+      max_runtime:
+        description: "Seconds to run before handing over (default 20400 = 5h40m)"
+        required: false
+        default: "20400"
+  schedule:
+    # Safety net only. Cheap: the guard below exits in a few seconds when the
+    # bot is already alive. Also keeps the repo "active", which is what stops
+    # GitHub from disabling scheduled workflows on public repos.
+    - cron: "23 */2 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tele2rubika-bot
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Run the bridge
+    runs-on: ubuntu-latest
+    timeout-minutes: 355 # 5h55m - under the hard 6h job limit
+
+    env:
+      # --- Telegram (secrets) ---
+      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+      TELEGRAM_SESSION_STRING: ${{ secrets.TELEGRAM_SESSION_STRING }}
+      # Non-secret knobs fall back to repo *variables*, so you can tune the bot
+      # without touching secrets.
+      TELEGRAM_CHANNELS: ${{ secrets.TELEGRAM_CHANNELS || vars.TELEGRAM_CHANNELS }}
+      TELEGRAM_CATCHUP_LIMIT: ${{ vars.TELEGRAM_CATCHUP_LIMIT || '50' }}
+      TELEGRAM_PARSE_DOCUMENTS: ${{ vars.TELEGRAM_PARSE_DOCUMENTS || 'true' }}
+
+      # --- Rubika ---
+      RUBIKA_BOT_TOKEN: ${{ secrets.RUBIKA_BOT_TOKEN }}
+      RUBIKA_API_BASE: ${{ vars.RUBIKA_API_BASE || 'https://botapi.rubika.ir/v3' }}
+      RUBIKA_POLL_INTERVAL: ${{ vars.RUBIKA_POLL_INTERVAL || '2.0' }}
+
+      # --- Supabase ---
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL || vars.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+
+      # --- delivery tuning ---
+      MIN_SCORE: ${{ vars.MIN_SCORE || '55' }}
+      INSTANT_SCORE: ${{ vars.INSTANT_SCORE || '88' }}
+      BATCH_WINDOW: ${{ vars.BATCH_WINDOW || '45' }}
+      BATCH_MAX: ${{ vars.BATCH_MAX || '5' }}
+      USER_HOURLY_CAP: ${{ vars.USER_HOURLY_CAP || '60' }}
+      RATE_LIMIT_PER_CHAT: ${{ vars.RATE_LIMIT_PER_CHAT || '12' }}
+      RATE_LIMIT_GLOBAL: ${{ vars.RATE_LIMIT_GLOBAL || '120' }}
+      HEALTH_CHECK_ENABLED: ${{ vars.HEALTH_CHECK_ENABLED || 'false' }}
+      DEFAULT_LANGUAGE: ${{ vars.DEFAULT_LANGUAGE || 'en' }}
+
+      # --- 24/7 chaining ---
+      MAX_RUNTIME: ${{ github.event.inputs.max_runtime || vars.MAX_RUNTIME || '20400' }}
+      HANDOFF_LEAD: ${{ vars.HANDOFF_LEAD || '180' }}
+      LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
+      INSTANCE_ID: ${{ github.run_id }}
+      # GITHUB_REPOSITORY is injected automatically; GITHUB_TOKEN is not.
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # -------------------------------------------------------------------
+      # Scheduled runs must not stack on top of a healthy chain.
+      # A live bot refreshes status/last-run.json every 5 minutes, so anything
+      # fresher than 20 minutes means "someone is already on duty".
+      # -------------------------------------------------------------------
+      - name: Pre-flight guard (scheduled runs only)
+        id: guard
+        if: github.event_name == 'schedule'
+        run: |
+          python3 - <<'PY'
+          import datetime as dt, json, os
+
+          path = "status/last-run.json"
+          if not os.path.exists(path):
+              print("no heartbeat file yet -> starting")
+              raise SystemExit(0)
+
+          try:
+              data = json.load(open(path, encoding="utf-8"))
+          except Exception as exc:
+              print(f"unreadable heartbeat ({exc}) -> starting")
+              raise SystemExit(0)
+
+          raw = str(data.get("updated_at") or "")
+          try:
+              then = dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+          except ValueError:
+              print("unparseable timestamp -> starting")
+              raise SystemExit(0)
+
+          age = (dt.datetime.now(dt.timezone.utc) - then).total_seconds()
+          print(f"heartbeat is {age / 60:.1f} min old (leader={data.get('leader')})")
+
+          if age < 20 * 60 and data.get("leader"):
+              print("another runner is alive -> skipping this scheduled run")
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+                  fh.write("skip=true\n")
+          PY
+
+      - name: Configuration check
+        if: steps.guard.outputs.skip != 'true'
+        run: python -m bot.main --check
+        continue-on-error: true
+
+      # -------------------------------------------------------------------
+      # The main event. `timeout` is only a safety net - the bot stops itself
+      # at MAX_RUNTIME, hands over, and exits cleanly well before this.
+      # -------------------------------------------------------------------
+      - name: Run the bot
+        id: bot
+        if: steps.guard.outputs.skip != 'true'
+        timeout-minutes: 350
+        run: |
+          timeout --preserve-status --signal=TERM 20700 \
+            python -m bot.main --max-runtime "$MAX_RUNTIME"
+        continue-on-error: true
+
+      # -------------------------------------------------------------------
+      # If the bot died before it could hand over (crash, OOM, network), the
+      # chain must not die with it. Re-arm from the shell.
+      # -------------------------------------------------------------------
+      - name: Fallback handoff
+        if: >-
+          always() &&
+          steps.guard.outputs.skip != 'true' &&
+          steps.bot.outcome != 'skipped' &&
+          steps.bot.outputs.handed_off != 'true'
+        run: |
+          echo "the bot did not hand over itself - re-arming the chain"
+          curl -sS -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/dispatches" \
+            -d '{"event_type":"bot-handoff"}'
+
+      - name: Upload logs
+        if: always() && steps.guard.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-logs-${{ github.run_id }}
+          path: logs/
+          if-no-files-found: ignore
+          retention-days: 3
+
+      # -------------------------------------------------------------------
+      # Committing the heartbeat leaves a public liveness trail and, just as
+      # importantly, counts as repository activity - which is what keeps
+      # GitHub's scheduled workflows enabled on a public repo.
+      # -------------------------------------------------------------------
+      - name: Commit heartbeat
+        if: always() && steps.guard.outputs.skip != 'true'
+        run: |
+          git config user.name  "tele2rubika-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add status/last-run.json
+          if git diff --cached --quiet; then
+            echo "heartbeat unchanged - nothing to commit"
+            exit 0
+          fi
+          git commit -m "chore(uptime): heartbeat from run ${{ github.run_id }}"
+          for attempt in 1 2 3 4 5; do
+            git pull --rebase --autostash origin "$BRANCH" || { sleep 5; continue; }
+            git push origin "HEAD:$BRANCH" && exit 0
+            sleep 5
+          done
+          echo "::warning::could not push the heartbeat after 5 attempts"
+        env:
+          BRANCH: ${{ github.ref_name }}

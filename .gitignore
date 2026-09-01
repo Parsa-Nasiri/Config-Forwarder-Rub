@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Environment / secrets - NEVER commit these
+.env
+.env.*
+!.env.example
+
+# Telethon local session files
+*.session
+*.session-journal
+
+# Local runtime state
+logs/
+tmp/
+bot_state.json
+.state/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Keep the generated status file tracked (it is the uptime heartbeat),
+# but ignore anything else the runner might drop in there.
+status/*
+!status/last-run.json
