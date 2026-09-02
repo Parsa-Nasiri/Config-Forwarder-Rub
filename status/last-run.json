@@ -1,21 +1,21 @@
 {
+  "channels": 1,
   "counters": {
     "configs": 0,
     "delivered": 0,
     "duplicates": 0,
     "failed": 0,
     "ingested": 0,
-    "messages": 50,
+    "messages": 0,
     "rejected_low_score": 0,
     "subscriptions": 0,
     "unique": 0
   },
-  "handed_off": false,
-  "instance": "33589925498",
-  "leader": false,
-  "started_at": "2026-09-02T04:13:01.955475Z",
+  "instance": "33648823403",
+  "leader": true,
+  "started_at": "2026-09-02T15:31:13.806590Z",
   "storage": "supabase",
-  "updated_at": "2026-09-02T09:51:33.917955Z",
-  "uptime_seconds": 20311,
+  "updated_at": "2026-09-02T18:21:16.360010Z",
+  "uptime_seconds": 10202,
   "version": "1.0.0"
 }
