@@ -1,14 +1,21 @@
 {
-  "instance": "initial",
-  "started_at": "2026-09-01T00:00:00Z",
-  "updated_at": "2026-09-01T00:00:00Z",
-  "uptime_seconds": 0,
-  "leader": false,
   "counters": {
+    "configs": 0,
     "delivered": 0,
+    "duplicates": 0,
     "failed": 0,
     "ingested": 0,
+    "messages": 0,
+    "rejected_low_score": 0,
+    "subscriptions": 0,
     "unique": 0
   },
-  "note": "Placeholder heartbeat. The first real run overwrites this file; the watchdog and the bot.yml pre-flight guard read it to decide liveness."
+  "handed_off": true,
+  "instance": "33589770416",
+  "leader": false,
+  "started_at": "2026-09-02T04:10:34.676425Z",
+  "storage": "memory",
+  "updated_at": "2026-09-02T04:12:12.021713Z",
+  "uptime_seconds": 97,
+  "version": "1.0.0"
 }
