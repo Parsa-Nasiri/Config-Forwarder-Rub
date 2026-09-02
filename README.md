@@ -1,4 +1,4 @@
-# Tele2Rubika
+# Config2Rub
 
 A bridge that watches Telegram config channels and forwards fresh, scored proxy
 configs to a **Rubika bot** — for you *and* anyone else who starts the bot.
@@ -91,7 +91,7 @@ In your repo: *Settings → Secrets and variables → Actions*.
 ### 5. Start it
 
 Push to `main`, then run the workflow manually once:
-*Actions → Tele2Rubika Bot → Run workflow*. The chain takes over from there.
+*Actions → Config2Rub Bot → Run workflow*. The chain takes over from there.
 
 ## The 24/7 chain (how it beats the 6-hour limit)
 
