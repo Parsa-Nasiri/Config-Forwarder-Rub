@@ -1,5 +1,4 @@
 {
-  "channels": 1,
   "counters": {
     "configs": 0,
     "delivered": 0,
@@ -11,11 +10,12 @@
     "subscriptions": 0,
     "unique": 0
   },
-  "instance": "33648823403",
-  "leader": true,
-  "started_at": "2026-09-02T15:31:13.806590Z",
+  "handed_off": true,
+  "instance": "33697657710",
+  "leader": false,
+  "started_at": "2026-09-03T00:03:11.247019Z",
   "storage": "supabase",
-  "updated_at": "2026-09-02T18:21:16.360010Z",
-  "uptime_seconds": 10202,
+  "updated_at": "2026-09-03T05:41:43.207733Z",
+  "uptime_seconds": 20311,
   "version": "1.0.0"
 }
