@@ -11,11 +11,11 @@
     "unique": 0
   },
   "handed_off": true,
-  "instance": "40927048500",
+  "instance": "41007898471",
   "leader": false,
-  "started_at": "2026-10-29T18:04:44.316863Z",
+  "started_at": "2026-10-30T05:22:38.810873Z",
   "storage": "supabase",
-  "updated_at": "2026-10-29T23:43:15.924108Z",
+  "updated_at": "2026-10-30T11:01:10.770285Z",
   "uptime_seconds": 20311,
   "version": "1.0.0"
 }
